@@ -10,7 +10,7 @@ JavaScript injection.
 ## Quick Start
 
 ```bash
-pip install PyQt5 PyQtWebEngine
+pip install PyQt6 PyQtWebEngine
 python main.py
 ```
 
