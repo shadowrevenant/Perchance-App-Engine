@@ -11,7 +11,7 @@ JavaScript injection.
 
 ```bash
 pip install PyQt6 PyQtWebEngine
-python main.py
+python launcher.py
 ```
 
 ***
