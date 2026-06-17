@@ -213,15 +213,23 @@ class AppWindow(QMainWindow):
         self.webview.reload()
 
     def _handle_download(self, item: QWebEngineDownloadRequest):
-        suggested = Path(item.suggestedFileName())
-        dest, _ = QFileDialog.getSaveFileName(self, "Save File", str(suggested))
-        if dest:
-            item.setDownloadDirectory(str(Path(dest).parent))
-            item.setDownloadFileName(Path(dest).name)
-            item.accept()
-            self.status.showMessage(f"⬇ Downloading → {Path(dest).name}")
-        else:
-            item.cancel()
+        data_dir = Path(__file__).parent.parent / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = item.suggestedFileName()
+
+        item.setDownloadDirectory(str(data_dir))
+        item.setDownloadFileName(filename)
+        item.accept()
+        self.status.showMessage(f"⬇ Downloading → {filename}")
+
+        def _on_finish():
+            if item.state() == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+                self.status.showMessage(f"✔ Saved → {filename}")
+            else:
+                self.status.showMessage(f"✗ Download failed: {item.interruptReasonString()}")
+
+            item.isFinishedChanged.connect(_on_finish)
 
     def _open_storage(self):
         path = Path(__file__).parent / "storage" / self.slug
