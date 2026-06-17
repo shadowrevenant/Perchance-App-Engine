@@ -35,7 +35,11 @@
       <h3 id="modal-title">Add Generator</h3>
       <div class="form-group">
         <label>Perchance slug (perchance.org/SLUG):</label>
-        <input type="text" id="slug-input" placeholder="e.g. ai-character-generator">
+        <div style="display: flex; gap: 6px;">
+          <input type="text" id="slug-input" placeholder="e.g. ai-character-generator" style="flex: 1;">
+          <button type="button" id="fetch-meta-btn" class="secondary-btn" style="padding: 6px 12px; shrink: 0; transform: none;">Fetch</button>
+        </div>
+        <div id="fetch-status-text" style="font-size: 10px; color: #4f98a3; margin-top: 4px; display: none; font-weight: 600;"></div>
       </div>
       <div class="form-group">
         <label>App Display Name:</label>
@@ -44,6 +48,10 @@
       <div class="form-group">
         <label>Description:</label>
         <input type="text" id="desc-input" placeholder="Short description details">
+      </div>
+      <div class="form-group">
+        <label>Icon URL (automatically fetched or custom):</label>
+        <input type="text" id="favicon-input" placeholder="e.g. https://user.uploads.dev/file/...">
       </div>
       <div class="form-group">
         <label>Color tag (hex):</label>
