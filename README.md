@@ -1,9 +1,9 @@
 # Perchance App Engine
 
-A cross-platform (Windows / macOS / Linux) desktop launcher that turns any
+A cross-platform (Windows / macOS / Linux) desktop launcher and browser extension that turns any
 public [perchance.org](https://perchance.org) generator into its own native app —
 with isolated storage, unlimited cache that you fully control, and per-app
-JavaScript injection.
+JavaScript injection (Desktop Client Only). 
 
 ***
 
