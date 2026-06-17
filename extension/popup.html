@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Perchance App Engine</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="launcher-header">
+    <div class="logo-area">
+      <span class="icon">⚙</span>
+      <h2>Perchance App Launcher</h2>
+    </div>
+    <div class="action-buttons">
+      <button id="add-btn" class="primary-btn">+ Add App</button>
+      <button id="edit-global-btn" class="secondary-btn">Global JS</button>
+    </div>
+  </div>
+  
+  <div class="search-wrap">
+    <input type="text" id="search-input" placeholder="Search generator apps...">
+  </div>
+
+  <div class="grid-container" id="grid-container">
+    <!-- Rendered dynamically in popup.js -->
+  </div>
+
+  <div class="footer">
+    <span id="status-text">0 apps installed</span>
+  </div>
+
+  <!-- Dynamic Modals for editing/adding apps -->
+  <div id="modal-container" class="modal-backdrop hide">
+    <div class="modal">
+      <h3 id="modal-title">Add Generator</h3>
+      <div class="form-group">
+        <label>Perchance slug (perchance.org/SLUG):</label>
+        <input type="text" id="slug-input" placeholder="e.g. ai-character-generator">
+      </div>
+      <div class="form-group">
+        <label>App Display Name:</label>
+        <input type="text" id="name-input" placeholder="e.g. AI Character">
+      </div>
+      <div class="form-group">
+        <label>Description:</label>
+        <input type="text" id="desc-input" placeholder="Short description details">
+      </div>
+      <div class="form-group">
+        <label>Color tag (hex):</label>
+        <div class="color-picker-group">
+          <input type="color" id="color-input" value="#01696f">
+          <input type="text" id="color-text" value="#01696f">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Custom JS Injector (overrides.js):</label>
+        <textarea id="override-js" placeholder="// Writes custom overrides here" rows="8"></textarea>
+      </div>
+      <div class="modal-buttons">
+        <button id="modal-cancel" class="back-btn">Cancel</button>
+        <button id="modal-save" class="primary-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

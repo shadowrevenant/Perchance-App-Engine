@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Perchance App Engine",
+  "version": "1.0.0",
+  "description": "Turns public perchance.org generators into independent popout apps with custom JavaScript injections and isolated profiles.",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon48.png"
+  },
+  "permissions": [
+    "storage",
+    "scripting",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://*.perchance.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
