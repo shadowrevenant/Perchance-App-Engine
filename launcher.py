@@ -7,28 +7,48 @@ isolated subprocess (separate window, profile, cache, and storage).
 
 import sys
 import os
+import subprocess
 import shutil
 import re
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
 import config
-
-SAFE_CHROMIUM_FLAGS = "--autoplay-policy=no-user-gesture-required"
 _SENTINEL = "__PCE_ENV_SET"
-
 if _SENTINEL not in os.environ:
-    import subprocess
-
     env = os.environ.copy()
     env[_SENTINEL] = "1"
-    env["QTWEBENGINE_CHROMIUM_FLAGS"] = SAFE_CHROMIUM_FLAGS
+    env["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        "--autoplay-policy=no-user-gesture-required "
+        "--disable-blink-features=AutomationControlled,TrustedDOMTypes "
+        "--disable-features=IsolateOrigins,site-per-process "
+        "--enable-features=NetworkService,NetworkServiceInProcess "
+        "--allow-running-insecure-content "
+        "--ignore-certificate-errors "
+        "--ignore-ssl-errors"
+    )
+    import subprocess
     result = subprocess.run([sys.executable] + sys.argv, env=env)
     sys.exit(result.returncode)
-
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = SAFE_CHROMIUM_FLAGS
-
-from PyQt6.QtCore import Qt, QProcess, QTimer, QPoint
+    
+# MUST be set before any Qt import — Qt reads this exactly once at startup
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+    "--autoplay-policy=no-user-gesture-required "
+    "--disable-blink-features=AutomationControlled,TrustedDOMTypes "
+    "--disable-features=IsolateOrigins,site-per-process "
+    "--enable-features=NetworkService,NetworkServiceInProcess "
+    "--allow-running-insecure-content "
+    "--ignore-certificate-errors "
+    "--ignore-ssl-errors"
+)
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import (
+    QWebEnginePage, QWebEngineProfile,
+    QWebEngineSettings, QWebEngineScript,
+    QWebEngineDownloadRequest   # renamed from QWebEngineDownloadItem
+)
+from PyQt6.QtCore import Qt, QSize, QProcess, QTimer, QPoint
 from PyQt6.QtGui import QIcon, QPixmap, QColor, QFont, QPainter, QBrush, QPen
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel,
@@ -38,41 +58,48 @@ from PyQt6.QtWidgets import (
     QColorDialog, QMenu
 )
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+
 RUNNER = str(config.APP_RUNNER)
 
 
 def launch_app(slug: str):
+    """Launch a generator as a completely independent subprocess."""
     proc = QProcess()
     proc.setProgram(sys.executable)
     proc.setArguments([RUNNER, slug, "--root", str(config.APP_ROOT)])
-    proc.startDetached()
+    proc.startDetached()  # detached = truly independent, launcher can close
 
 
 def make_initials_icon(name: str, color: str, size: int = 64) -> QPixmap:
+    """Generate a simple colored circle with initials as a fallback icon."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
-
     painter = QPainter(pm)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setBrush(QBrush(QColor(color)))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(0, 0, size, size)
-
     painter.setPen(QPen(QColor("#ffffff")))
     font = QFont("Segoe UI", size // 3, QFont.Weight.Bold)
     painter.setFont(font)
-    words = [w for w in re.split(r"[\s\-_]+", name) if w]
-    initials = "".join(w[0].upper() for w in words[:2]) or name[:1].upper()
+    initials = "".join(w[0].upper() for w in name.split("-")[:2]) or name[0].upper()
     painter.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, initials[:2])
     painter.end()
     return pm
 
 
+# ─── App Card ─────────────────────────────────────────────────────────────────
+
 class AppCard(QFrame):
+    """A clickable card representing one generator."""
+
     def __init__(self, slug: str, parent=None):
         super().__init__(parent)
         self.slug = slug
         self.meta = config.read_meta(slug)
+        self._running = False
 
         self.setObjectName("appCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -83,12 +110,14 @@ class AppCard(QFrame):
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
+        # Icon
         self.icon_label = QLabel()
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setFixedSize(64, 64)
         self._set_icon()
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
+        # Name
         name_label = QLabel(self.meta.get("name", slug))
         name_label.setObjectName("cardName")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -96,6 +125,7 @@ class AppCard(QFrame):
         name_label.setMaximumWidth(130)
         layout.addWidget(name_label)
 
+        # Description (truncated)
         desc = self.meta.get("description", "")
         if desc:
             desc_label = QLabel(desc[:60] + ("…" if len(desc) > 60 else ""))
@@ -109,17 +139,13 @@ class AppCard(QFrame):
     def _set_icon(self):
         fav = config.gen_dir(self.slug) / "favicon.png"
         color = self.meta.get("color", "#01696f")
-        name = self.meta.get("name", self.slug)
-
+        name  = self.meta.get("name", self.slug)
         if fav.exists():
             pm = QPixmap(str(fav)).scaled(
-                64, 64,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
+                64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
             )
         else:
             pm = make_initials_icon(name, color, 64)
-
         self.icon_label.setPixmap(pm)
 
     def mousePressEvent(self, e):
@@ -130,6 +156,7 @@ class AppCard(QFrame):
 
     def _launch(self):
         launch_app(self.slug)
+        # Brief visual flash to indicate launch
         self.setObjectName("appCardLaunching")
         self.style().unpolish(self)
         self.style().polish(self)
@@ -142,13 +169,13 @@ class AppCard(QFrame):
 
     def _context_menu(self, pos: QPoint):
         menu = QMenu(self)
-        menu.addAction("▶ Launch", self._launch)
+        menu.addAction("▶  Launch", self._launch)
         menu.addSeparator()
-        menu.addAction("✎ Edit App", self._edit)
-        menu.addAction("📂 Open Data Folder", self._open_data)
-        menu.addAction("🖥 Create Desktop Shortcut", self._create_shortcut)
+        menu.addAction("✎  Edit App", self._edit)
+        menu.addAction("📂  Open Data Folder", self._open_data)
+        menu.addAction("🖥  Create Desktop Shortcut", self._create_shortcut)
         menu.addSeparator()
-        menu.addAction("🗑 Remove App", self._remove)
+        menu.addAction("🗑  Remove App", self._remove)
         menu.exec(pos)
 
     def _edit(self):
@@ -171,14 +198,14 @@ class AppCard(QFrame):
 
     def _remove(self):
         reply = QMessageBox.question(
-            self,
-            "Remove App",
+            self, "Remove App",
             f"Remove '{self.meta.get('name', self.slug)}'?\n\n"
             "This deletes the generator folder but keeps your data (cache/storage/files).",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
             shutil.rmtree(config.gen_dir(self.slug), ignore_errors=True)
+            # Notify parent to refresh
             p = self.parent()
             while p and not isinstance(p, MainWindow):
                 p = p.parent()
@@ -186,24 +213,28 @@ class AppCard(QFrame):
                 p.refresh_grid()
 
 
+# ─── Desktop Shortcut Creator ─────────────────────────────────────────────────
+
 def create_desktop_shortcut(slug: str):
     meta = config.read_meta(slug)
     name = meta.get("name", slug)
-    fav = config.gen_dir(slug) / "favicon.png"
+    fav  = config.gen_dir(slug) / "favicon.png"
     python = sys.executable
     runner = str(config.APP_RUNNER)
-    root = str(config.APP_ROOT)
+    root   = str(config.APP_ROOT)
 
     if sys.platform == "win32":
+        # Create a .bat launcher + optional .lnk via PowerShell
         desktop = Path(os.path.expanduser("~")) / "Desktop"
         bat_path = desktop / f"{name}.bat"
         bat_path.write_text(
             f'@echo off\n"{python}" "{runner}" {slug} --root "{root}"\n',
             encoding="utf-8"
         )
+        # Try to also make a proper .lnk shortcut
         try:
+            import winshell
             from win32com.client import Dispatch
-
             lnk_path = str(desktop / f"{name}.lnk")
             shell = Dispatch("WScript.Shell")
             shortcut = shell.CreateShortCut(lnk_path)
@@ -213,12 +244,13 @@ def create_desktop_shortcut(slug: str):
             if fav.exists():
                 shortcut.IconLocation = str(fav)
             shortcut.save()
-            bat_path.unlink(missing_ok=True)
+            bat_path.unlink(missing_ok=True)  # prefer .lnk if it worked
             msg = f"Shortcut created:\n{lnk_path}"
         except Exception:
             msg = f"Batch launcher created:\n{bat_path}"
 
     elif sys.platform == "darwin":
+        # Create a .command file on the Desktop
         desktop = Path(os.path.expanduser("~")) / "Desktop"
         cmd_path = desktop / f"{name}.command"
         cmd_path.write_text(
@@ -229,6 +261,7 @@ def create_desktop_shortcut(slug: str):
         msg = f"Launcher created:\n{cmd_path}"
 
     else:
+        # Linux: .desktop file
         desktop = Path(os.path.expanduser("~")) / "Desktop"
         apps_dir = Path(os.path.expanduser("~")) / ".local/share/applications"
         desktop.mkdir(exist_ok=True)
@@ -254,12 +287,13 @@ def create_desktop_shortcut(slug: str):
     QMessageBox.information(None, "Shortcut Created", msg)
 
 
+# ─── Add App Dialog ───────────────────────────────────────────────────────────
+
 class AddAppDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Generator App")
         self.setMinimumWidth(420)
-
         layout = QFormLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
@@ -267,7 +301,7 @@ class AddAppDialog(QDialog):
         info = QLabel(
             "Enter the perchance.org generator slug.\n"
             "Example: for perchance.org/ai-character-generator\n"
-            "enter: ai-character-generator"
+            "enter:  ai-character-generator"
         )
         info.setWordWrap(True)
         info.setObjectName("infoLabel")
@@ -285,9 +319,7 @@ class AddAppDialog(QDialog):
         self.desc_input.setPlaceholderText("Short description (optional)")
         layout.addRow("Description:", self.desc_input)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._validate)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
@@ -297,12 +329,9 @@ class AddAppDialog(QDialog):
         if not slug:
             QMessageBox.warning(self, "Invalid", "Slug cannot be empty.")
             return
-        if not re.match(r"^[a-z0-9\-_]+$", slug):
-            QMessageBox.warning(
-                self,
-                "Invalid",
-                "Slug must be lowercase letters, numbers, hyphens, or underscores."
-            )
+        if not re.match(r'^[a-z0-9\-_]+$', slug):
+            QMessageBox.warning(self, "Invalid",
+                "Slug must be lowercase letters, numbers, hyphens, or underscores.")
             return
         self.slug_input.setText(slug)
         self.accept()
@@ -314,12 +343,13 @@ class AddAppDialog(QDialog):
         return slug, name, desc
 
 
+# ─── Edit App Dialog ──────────────────────────────────────────────────────────
+
 class EditAppDialog(QDialog):
     def __init__(self, slug: str, parent=None):
         super().__init__(parent)
         self.slug = slug
         self.meta = config.read_meta(slug)
-
         self.setWindowTitle(f"Edit — {slug}")
         self.setMinimumSize(640, 560)
 
@@ -327,13 +357,14 @@ class EditAppDialog(QDialog):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
 
+        # Meta fields
         form = QFormLayout()
         form.setSpacing(10)
 
         self.name_input = QLineEdit(self.meta.get("name", slug))
         self.desc_input = QLineEdit(self.meta.get("description", ""))
-        self.color_btn = QPushButton()
-        self._accent = self.meta.get("color", "#01696f")
+        self.color_btn  = QPushButton()
+        self._accent    = self.meta.get("color", "#01696f")
         self._update_color_btn()
         self.color_btn.clicked.connect(self._pick_color)
 
@@ -341,6 +372,7 @@ class EditAppDialog(QDialog):
         form.addRow("Description:", self.desc_input)
         form.addRow("Accent color:", self.color_btn)
 
+        # Favicon
         fav_row = QHBoxLayout()
         fav_label = QLabel("Favicon:")
         self.fav_preview = QLabel()
@@ -357,7 +389,8 @@ class EditAppDialog(QDialog):
 
         layout.addLayout(form)
 
-        layout.addWidget(QLabel("overrides.js (runs after global-overrides.js on every page load)"))
+        # overrides.js editor
+        layout.addWidget(QLabel("overrides.js  (runs after global-overrides.js on every page load)"))
         self.js_editor = QTextEdit()
         self.js_editor.setFont(QFont("Consolas", 11))
         js_file = config.gen_dir(slug) / "overrides.js"
@@ -365,9 +398,8 @@ class EditAppDialog(QDialog):
             self.js_editor.setPlainText(js_file.read_text("utf-8"))
         layout.addWidget(self.js_editor, 1)
 
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
+        # Buttons
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         btns.button(QDialogButtonBox.StandardButton.Save).setText("Save")
         btns.accepted.connect(self._save)
         btns.rejected.connect(self.reject)
@@ -387,10 +419,7 @@ class EditAppDialog(QDialog):
 
     def _pick_fav(self):
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose Favicon",
-            "",
-            "Images (*.png *.jpg *.ico *.svg *.webp)"
+            self, "Choose Favicon", "", "Images (*.png *.jpg *.ico *.svg *.webp)"
         )
         if path:
             dest = config.gen_dir(self.slug) / "favicon.png"
@@ -400,20 +429,16 @@ class EditAppDialog(QDialog):
     def _refresh_fav_preview(self):
         fav = config.gen_dir(self.slug) / "favicon.png"
         if fav.exists():
-            pm = QPixmap(str(fav)).scaled(
-                40, 40,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
+            pm = QPixmap(str(fav)).scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.fav_preview.setPixmap(pm)
         else:
             self.fav_preview.setText("—")
 
     def _save(self):
         meta = config.read_meta(self.slug)
-        meta["name"] = self.name_input.text().strip() or self.slug
+        meta["name"]        = self.name_input.text().strip() or self.slug
         meta["description"] = self.desc_input.text().strip()
-        meta["color"] = self._accent
+        meta["color"]       = self._accent
         config.write_meta(self.slug, meta)
 
         js_file = config.gen_dir(self.slug) / "overrides.js"
@@ -421,38 +446,7 @@ class EditAppDialog(QDialog):
         self.accept()
 
 
-class _EditFileDialog(QDialog):
-    def __init__(self, title: str, filepath: Path, parent=None):
-        super().__init__(parent)
-        self.filepath = filepath
-
-        self.setWindowTitle(f"Edit — {title}")
-        self.setMinimumSize(680, 520)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(10)
-
-        layout.addWidget(QLabel(str(filepath)))
-
-        self.editor = QTextEdit()
-        self.editor.setFont(QFont("Consolas", 11))
-        if filepath.exists():
-            self.editor.setPlainText(filepath.read_text("utf-8"))
-        layout.addWidget(self.editor, 1)
-
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        btns.button(QDialogButtonBox.StandardButton.Save).setText("Save")
-        btns.accepted.connect(self._save)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-
-    def _save(self):
-        self.filepath.write_text(self.editor.toPlainText(), encoding="utf-8")
-        self.accept()
-
+# ─── Main Launcher Window ─────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -460,7 +454,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Perchance App Engine")
         self.setMinimumSize(700, 500)
         self.resize(900, 600)
-
         fav = config.ASSETS_DIR / "launcher-icon.png"
         if fav.exists():
             self.setWindowIcon(QIcon(str(fav)))
@@ -472,11 +465,11 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
+        # ── Header ──
         header = QFrame()
         header.setObjectName("launcherHeader")
         header.setFixedHeight(60)
@@ -488,6 +481,7 @@ class MainWindow(QMainWindow):
         h_layout.addWidget(title)
         h_layout.addStretch()
 
+        # Search
         self.search = QLineEdit()
         self.search.setObjectName("searchBar")
         self.search.setPlaceholderText("Search apps…")
@@ -495,12 +489,14 @@ class MainWindow(QMainWindow):
         self.search.textChanged.connect(self.refresh_grid)
         h_layout.addWidget(self.search)
 
-        add_btn = QPushButton("＋ Add App")
+        # Add app button
+        add_btn = QPushButton("＋  Add App")
         add_btn.setObjectName("addBtn")
         add_btn.setFixedHeight(34)
         add_btn.clicked.connect(self._add_app)
         h_layout.addWidget(add_btn)
 
+        # Edit global overrides
         global_btn = QPushButton("✎ Global JS")
         global_btn.setObjectName("secondaryBtn")
         global_btn.setFixedHeight(34)
@@ -509,11 +505,13 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(header)
 
+        # Divider
         div = QFrame()
         div.setFrameShape(QFrame.Shape.HLine)
         div.setObjectName("headerDivider")
         root_layout.addWidget(div)
 
+        # ── Scrollable grid ──
         scroll = QScrollArea()
         scroll.setObjectName("appScroll")
         scroll.setWidgetResizable(True)
@@ -529,12 +527,12 @@ class MainWindow(QMainWindow):
         scroll.setWidget(self.grid_container)
         root_layout.addWidget(scroll, 1)
 
+        # ── Footer ──
         footer = QFrame()
         footer.setObjectName("footer")
         footer.setFixedHeight(28)
         f_layout = QHBoxLayout(footer)
         f_layout.setContentsMargins(16, 0, 16, 0)
-
         self.footer_label = QLabel()
         self.footer_label.setObjectName("footerLabel")
         f_layout.addWidget(self.footer_label)
@@ -548,6 +546,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(footer)
 
     def refresh_grid(self):
+        # Clear existing cards
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             if item.widget():
@@ -556,15 +555,14 @@ class MainWindow(QMainWindow):
         query = self.search.text().strip().lower()
         gens = [
             g for g in config.list_generators()
-            if not query
-            or query in g.lower()
-            or query in config.read_meta(g).get("name", "").lower()
+            if not query or query in g.lower() or
+               query in config.read_meta(g).get("name", "").lower()
         ]
 
         if not gens:
             empty = QLabel(
-                "No apps yet.\nClick ＋ Add App to install a generator."
-                if not query else f'No apps matching "{query}"'
+                "No apps yet.\nClick  ＋ Add App  to install a generator." if not query
+                else f"No apps matching \"{query}\""
             )
             empty.setObjectName("emptyLabel")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -576,7 +574,9 @@ class MainWindow(QMainWindow):
                 self.grid_layout.addWidget(card, i // cols, i % cols)
 
         count = len(gens)
-        self.footer_label.setText(f"{count} app{'s' if count != 1 else ''} installed")
+        self.footer_label.setText(
+            f"{count} app{'s' if count != 1 else ''} installed"
+        )
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -586,11 +586,12 @@ class MainWindow(QMainWindow):
         dlg = AddAppDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-
         slug, name, desc = dlg.result_data()
+
         gdir = config.gen_dir(slug)
         gdir.mkdir(parents=True, exist_ok=True)
 
+        # Scaffold files
         js_file = gdir / "overrides.js"
         if not js_file.exists():
             js_file.write_text(
@@ -610,9 +611,9 @@ class MainWindow(QMainWindow):
 
         self.refresh_grid()
 
+        # Offer to launch immediately
         reply = QMessageBox.question(
-            self,
-            "Launch App",
+            self, "Launch App",
             f"'{name}' was added. Launch it now?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -634,72 +635,99 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         self.setStyleSheet("""
-QMainWindow, QWidget {
-    background:#1c1b19; color:#cdccca;
-    font-family:'Segoe UI','Inter',sans-serif; font-size:13px;
-}
-#launcherHeader { background:#171614; border-bottom:none; }
-#launcherTitle {
-    font-size:17px; font-weight:700; color:#4f98a3; letter-spacing:0.5px;
-}
-#headerDivider { background:#262523; border:none; max-height:1px; }
-#searchBar {
-    background:#22211f; border:1px solid #393836; border-radius:17px;
-    padding:5px 14px; color:#cdccca; font-size:12px;
-}
-#searchBar:focus { border-color:#4f98a3; }
-#addBtn {
-    background:#01696f; border:none; border-radius:7px;
-    padding:0 16px; color:#f9f8f5; font-weight:600; font-size:13px;
-}
-#addBtn:hover { background:#0c4e54; }
-#addBtn:pressed { background:#0f3638; }
-#secondaryBtn {
-    background:#22211f; border:1px solid #393836; border-radius:7px;
-    padding:0 12px; color:#9a9896; font-size:12px;
-}
-#secondaryBtn:hover {
-    background:#2d2c2a; color:#cdccca; border-color:#5a5957;
-}
-#appScroll { background:#1c1b19; border:none; }
-#gridContainer { background:#1c1b19; }
-#appCard {
-    background:#201f1d; border:1px solid #2d2c2a; border-radius:12px;
-}
-#appCard:hover { background:#252422; border-color:#393836; }
-#appCardLaunching {
-    background:#313b3b; border:1px solid #4f98a3; border-radius:12px;
-}
-#cardName { font-size:12px; font-weight:600; color:#cdccca; }
-#cardDesc { font-size:10px; color:#797876; }
-#emptyLabel { font-size:14px; color:#5a5957; }
-#footer { background:#171614; border-top:1px solid #1f1e1c; }
-#footerLabel { font-size:11px; color:#5a5957; }
-#footerBtn {
-    background:transparent; border:none; color:#5a5957; font-size:11px;
-}
-#footerBtn:hover { color:#9a9896; }
-QScrollBar:vertical { background:#1c1b19; width:5px; }
-QScrollBar::handle:vertical { background:#393836; border-radius:2px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
-QDialog { background:#1c1b19; }
-QLabel { color:#cdccca; }
-QLineEdit, QTextEdit {
-    background:#22211f; border:1px solid #393836; border-radius:6px;
-    padding:6px 10px; color:#cdccca; selection-background-color:#313b3b;
-}
-QLineEdit:focus, QTextEdit:focus { border-color:#4f98a3; }
-QDialogButtonBox QPushButton {
-    background:#22211f; border:1px solid #393836; border-radius:6px;
-    padding:6px 16px; color:#cdccca; min-width:80px;
-}
-QDialogButtonBox QPushButton:hover {
-    background:#313b3b; border-color:#4f98a3; color:#4f98a3;
-}
-QFormLayout QLabel { color:#9a9896; font-size:12px; }
-#infoLabel { color:#797876; font-size:11px; }
-""")
+            QMainWindow, QWidget {
+                background:#1c1b19; color:#cdccca;
+                font-family:'Segoe UI','Inter',sans-serif; font-size:13px;
+            }
+            #launcherHeader { background:#171614; border-bottom:none; }
+            #launcherTitle { font-size:17px; font-weight:700; color:#4f98a3;
+                letter-spacing:0.5px; }
+            #headerDivider { background:#262523; border:none; max-height:1px; }
+            #searchBar {
+                background:#22211f; border:1px solid #393836; border-radius:17px;
+                padding:5px 14px; color:#cdccca; font-size:12px;
+            }
+            #searchBar:focus { border-color:#4f98a3; }
+            #addBtn {
+                background:#01696f; border:none; border-radius:7px;
+                padding:0 16px; color:#f9f8f5; font-weight:600; font-size:13px;
+            }
+            #addBtn:hover { background:#0c4e54; }
+            #addBtn:pressed { background:#0f3638; }
+            #secondaryBtn {
+                background:#22211f; border:1px solid #393836; border-radius:7px;
+                padding:0 12px; color:#9a9896; font-size:12px;
+            }
+            #secondaryBtn:hover { background:#2d2c2a; color:#cdccca;
+                border-color:#5a5957; }
+            #appScroll { background:#1c1b19; border:none; }
+            #gridContainer { background:#1c1b19; }
+            #appCard {
+                background:#201f1d; border:1px solid #2d2c2a; border-radius:12px;
+            }
+            #appCard:hover {
+                background:#252422; border-color:#393836;
+            }
+            #appCardLaunching {
+                background:#313b3b; border:1px solid #4f98a3; border-radius:12px;
+            }
+            #cardName { font-size:12px; font-weight:600; color:#cdccca; }
+            #cardDesc { font-size:10px; color:#797876; }
+            #emptyLabel { font-size:14px; color:#5a5957; }
+            #footer { background:#171614; border-top:1px solid #1f1e1c; }
+            #footerLabel { font-size:11px; color:#5a5957; }
+            #footerBtn {
+                background:transparent; border:none; color:#5a5957; font-size:11px;
+            }
+            #footerBtn:hover { color:#9a9896; }
+            QScrollBar:vertical { background:#1c1b19; width:5px; }
+            QScrollBar::handle:vertical { background:#393836; border-radius:2px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+            QDialog { background:#1c1b19; }
+            QLabel { color:#cdccca; }
+            QLineEdit, QTextEdit {
+                background:#22211f; border:1px solid #393836; border-radius:6px;
+                padding:6px 10px; color:#cdccca; selection-background-color:#313b3b;
+            }
+            QLineEdit:focus, QTextEdit:focus { border-color:#4f98a3; }
+            QDialogButtonBox QPushButton {
+                background:#22211f; border:1px solid #393836; border-radius:6px;
+                padding:6px 16px; color:#cdccca; min-width:80px;
+            }
+            QDialogButtonBox QPushButton:hover {
+                background:#313b3b; border-color:#4f98a3; color:#4f98a3;
+            }
+            QFormLayout QLabel { color:#9a9896; font-size:12px; }
+            #infoLabel { color:#797876; font-size:11px; }
+        """)
 
+
+class _EditFileDialog(QDialog):
+    def __init__(self, title: str, filepath: Path, parent=None):
+        super().__init__(parent)
+        self.filepath = filepath
+        self.setWindowTitle(f"Edit — {title}")
+        self.setMinimumSize(680, 520)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel(str(filepath)))
+        self.editor = QTextEdit()
+        self.editor.setFont(QFont("Consolas", 11))
+        if filepath.exists():
+            self.editor.setPlainText(filepath.read_text("utf-8"))
+        layout.addWidget(self.editor, 1)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        btns.button(QDialogButtonBox.StandardButton.Save).setText("Save")
+        btns.accepted.connect(self._save)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    def _save(self):
+        self.filepath.write_text(self.editor.toPlainText(), encoding="utf-8")
+        self.accept()
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
     app = QApplication(sys.argv)
