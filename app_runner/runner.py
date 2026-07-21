@@ -14,7 +14,11 @@ Usage:
 import sys
 import os
 import argparse
+import json
+import urllib.parse
 from pathlib import Path
+from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest
+from PyQt6.QtCore import QTimer
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -212,6 +216,9 @@ class AppWindow(QMainWindow):
     def _reload(self):
         self.webview.reload()
 
+    # ------------------------------------------------------------------
+    # Download handling
+    # ------------------------------------------------------------------
     def _handle_download(self, item: QWebEngineDownloadRequest):
         data_dir = Path(__file__).parent.parent / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -229,7 +236,7 @@ class AppWindow(QMainWindow):
             else:
                 self.status.showMessage(f"✗ Download failed: {item.interruptReasonString()}")
 
-            item.isFinishedChanged.connect(_on_finish)
+        item.isFinishedChanged.connect(_on_finish)
 
     def _open_storage(self):
         path = Path(__file__).parent / "storage" / self.slug
