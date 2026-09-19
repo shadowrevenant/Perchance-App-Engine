@@ -1,0 +1,25 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime state and potentially sensitive browser data
+data/
+gens/
+assets/models/
+qt_user_data/
+eula_status.cfg
+license_status.cfg
+
+# Incomplete downloads and local logs
+*.part
+*.log
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

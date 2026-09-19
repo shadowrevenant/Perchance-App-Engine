@@ -1,0 +1,22 @@
+JAWLESS PERCHANCE APP ENGINE — LICENSE NOTICE
+
+Copyright (C) 2026 Jawless contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for details.
+
+The complete GPLv3 text is provided in the LICENSE file. Corresponding source
+code is included with the portable distribution.
+
+Bundled third-party software, models, and content remain governed by their own
+licenses. See THIRD_PARTY_NOTICES.md and the accompanying license files.
+
+This is an independent, unofficial project. It is not associated with,
+sponsored by, endorsed by, or affiliated with Perchance.org, TiddlyWiki,
+Hugging Face, Riverbank Computing, The Qt Company, Microsoft, or the model
+authors.

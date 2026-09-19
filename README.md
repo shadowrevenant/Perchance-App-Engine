@@ -1,201 +1,181 @@
-# Perchance App Engine
+# Jawless Perchance App Engine
 
-A cross-platform (Windows / macOS / Linux) desktop launcher and browser extension that turns any
-public [perchance.org](https://perchance.org) generator into its own native app —
-with isolated storage, unlimited cache that you fully control, and per-app
-JavaScript injection (Desktop Client Only). 
+Jawless Perchance App Engine is a Windows, macOS, and Linux desktop launcher
+for public `perchance.org` generators. Each generator has its own persistent
+browser profile, cache, downloads, and optional JavaScript overrides. The
+bundle also includes a searchable image gallery, optional local ONNX tagging
+and upscaling, and an offline TiddlyWiki notes window.
 
-***
+This is an independent, unofficial project. It is not affiliated with or
+endorsed by Perchance, TiddlyWiki, Hugging Face, or the model authors.
 
-## Quick Start
+## Features
+
+- Isolated cache, cookies, storage, and downloads for each generator.
+- Global and per-generator JavaScript overrides.
+- SQLite image gallery with tags, ratings, prompt metadata, and thumbnails.
+- Optional local WD SwinV2 tagging and ONNX upscaling.
+- Offline TiddlyWiki notes, using the same PyQt6 runtime as the main app.
+- Configurable downloads, window behavior, inference provider, and models.
+
+## Requirements
+
+- Python 3.10 or newer; Python 3.12 is recommended.
+- Approximately 1 GB for Qt and a local virtual environment.
+- An internet connection for Perchance pages and optional model download.
+- The AI tools require additional packages and about 468 MB for the tagger.
+
+Do not install the dependencies globally. Use the project-local virtual
+environment shown below.
+
+## Windows setup
+
+Working directory: the extracted `Jawless` folder.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe app-engine.py
+```
+
+If you downloaded the complete Windows portable release, do not run these setup
+steps. Extract the entire archive and double-click `Start-Jawless.cmd`; its
+embedded runtime and tagger model are already included.
+
+To enable local AI tools with CPU inference:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-ai.txt
+.\.venv\Scripts\python.exe imagetools.py --download
+.\.venv\Scripts\python.exe imagetools.py --verify
+```
+
+For NVIDIA inference, install a CUDA-compatible `onnxruntime-gpu` build in
+place of `onnxruntime`. Check ONNX Runtime's CUDA/cuDNN compatibility before
+changing the package.
+
+## Linux setup
+
+Some distributions require their `python3-venv` package before the launcher
+can run (for example, `python3-venv` on Debian or Ubuntu). PyQt and Qt
+WebEngine are installed from `requirements.txt`; the operating system may
+also need the usual desktop libraries required by Qt.
 
 ```bash
-pip install PyQt6 PyQtWebEngine
+python3 -m venv .venv
+./.venv/bin/python -m pip install --upgrade pip
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python app-engine.py
+```
+
+Optional CPU AI tools:
+
+```bash
+./.venv/bin/python -m pip install -r requirements-ai.txt
+./.venv/bin/python imagetools.py --download
+./.venv/bin/python imagetools.py --verify
+```
+
+## macOS setup
+
+Use a supported Python 3 distribution and a local virtual environment.
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install --upgrade pip
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python app-engine.py
+```
+
+Optional CPU AI tools use the same commands as Linux. ONNX Runtime may expose
+CoreML depending on the installed build and machine.
+
+## Running components directly
+
+```text
 python launcher.py
+python app_runner/runner.py <generator-slug> --root <program-root>
+python gallery.py
+python twnotes.py
+python configurate.py
 ```
 
-***
+Run `app-engine.py` for normal use so the first-run GPL notice is displayed.
 
-## Project Structure
+## Adding a generator
 
-```
-perchance-app/
-├── main.py                     ← Open this to launch
-├── config.py                   ← Shared paths (edit if you move the folder)
-├── global-overrides.js         ← JS injected into ALL generator apps
-├── requirements.txt
-│
-├── launcher/
-│   └── launcher.py             ← The app grid launcher UI
-│
-├── app_runner/
-│   └── runner.py               ← Per-generator window (launched as subprocess)
-│
-├── gens/                       ← One folder per installed generator
-│   └── <slug>/
-│       ├── meta.json           ← Name, description, accent color
-│       ├── overrides.js        ← JS injected only for this generator
-│       └── favicon.png         ← App icon (optional)
-│
-└── data/                       ← All runtime data — back this up!
-    └── <slug>/
-        ├── cache/              ← HTTP disk cache (unlimited, never auto-deleted)
-        ├── storage/            ← localStorage, IndexedDB, cookies
-        └── files/              ← Downloaded/saved files
+Use **Add App** in the launcher and enter the portion after
+`https://perchance.org/`. The launcher creates:
+
+```text
+gens/<slug>/meta.json
+gens/<slug>/overrides.js
 ```
 
-***
+Runtime data is stored under:
 
-## Adding a Generator
-
-### Via the Launcher UI
-1. Click **＋ Add App**
-2. Enter the generator's slug (the part after `perchance.org/`)
-3. Optionally set a display name, description, and accent color
-4. Click OK — the app appears in the grid
-
-### Manually
-```bash
-mkdir gens/my-generator
-echo '{"name":"My Generator","slug":"my-generator","color":"#8a4fff"}' > gens/my-generator/meta.json
-echo 'console.log("hello");' > gens/my-generator/overrides.js
-# optionally add gens/my-generator/favicon.png
+```text
+data/<slug>/cache/
+data/<slug>/storage/
+data/<slug>/files/
+data/_gallery/gallery.db
+data/_gallery/thumbs/
 ```
 
-***
+Back up the entire `data` directory to preserve cookies, browser storage,
+downloads, gallery tags, ratings, and prompt metadata.
 
-## Running a Generator as a Standalone App
+## Browser compatibility mode
 
-### From the Launcher
-Click any card — it launches in its **own separate window** with its own process,
-profile, cache, and storage. Multiple generators run simultaneously.
+The default configuration preserves normal Chromium certificate validation and
+site isolation. If Perchance or Cloudflare will not load in the embedded
+browser, open **Configure → Advanced** and enable **Legacy Perchance
+compatibility mode**, then close and reopen all generator windows.
 
-### Direct (bypassing the launcher entirely)
-```bash
-python app_runner/runner.py <slug>
-# Example:
-python app_runner/runner.py ai-character-generator
+That mode uses certificate-error, insecure-content, and reduced site-isolation
+flags. It should remain off unless it is required for a known compatibility
+problem. Do not use it for unrelated browsing or while handling sensitive
+accounts. The runner intentionally has no general URL bar.
+
+## JavaScript overrides
+
+Scripts are injected in this order at document-ready time:
+
+1. `global-overrides.js` or `global-override.js`, if present.
+2. `gens/<slug>/overrides.js`, if present.
+
+The per-generator script runs last. Use the lightning button to re-run the
+scripts on the current document.
+
+## Local model integrity
+
+The built-in downloader pins the official files currently used by this build:
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| `model.onnx` | 467,460,978 | `e6774bff34d43bd49f75a47db4ef217dce701c9847b546523eb85ff6dbba1db1` |
+| `selected_tags.csv` | 308,468 | `298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217` |
+
+Run `python imagetools.py --verify` after copying or restoring model files.
+
+## Development checks
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m compileall -q .
 ```
 
-### Desktop Shortcuts
-Right-click any app card → **🖥 Create Desktop Shortcut**.
+The source tree should be placed under version control before active feature
+development or distribution. Runtime data, environments, caches, models, and
+license-acceptance state are excluded by `.gitignore`.
 
-| Platform | Result |
-|---|---|
-| Windows | `.lnk` shortcut (falls back to `.bat`) on Desktop |
-| macOS | `.command` script on Desktop |
-| Linux | `.desktop` entry on Desktop + `~/.local/share/applications/` |
+## License
 
-***
+Jawless Perchance App Engine is free software distributed under the GNU General
+Public License version 3. The complete terms are in `LICENSE`. Recipients may
+use, study, modify, and redistribute the program under GPLv3, including for
+commercial purposes, and distributed derivatives must remain GPL-compatible.
 
-## JavaScript Injection
-
-Every time a generator page finishes loading, scripts run in this order:
-
-```
-Page load complete
-    │
-    ▼
-global-overrides.js       ← runs for ALL generators
-    │
-    ▼
-gens/<slug>/overrides.js  ← runs only for this generator
-```
-
-Click **⚡** in the app's chrome bar to re-run both scripts without reloading.
-
-### Injecting CSS
-```javascript
-// In overrides.js — inject a <style> tag
-const style = document.createElement('style');
-style.textContent = `
-  body { font-size: 16px !important; }
-  .some-annoying-element { display: none !important; }
-`;
-document.head.appendChild(style);
-```
-
-***
-
-## Storage & Cache
-
-Everything lives under `./data/<slug>/` — **next to your script, never in a
-system temp folder**.
-
-| Path | Contents | Limit |
-|---|---|---|
-| `data/<slug>/cache/` | HTTP response cache | **Unlimited** |
-| `data/<slug>/storage/` | localStorage, IndexedDB, cookies | **Unlimited** |
-| `data/<slug>/files/` | Downloads and file saves | Disk only |
-
-### Backup / Sync / Restore
-Just copy or sync the entire `data/` folder. Each generator's data is fully
-self-contained and portable.
-
-```bash
-# Backup
-cp -r data/ ~/Dropbox/perchance-backup/
-
-# Restore
-cp -r ~/Dropbox/perchance-backup/ data/
-```
-
-***
-
-## What This App Does NOT Have (By Design)
-
-| Feature | Reason omitted |
-|---|---|
-| Login / account system | Handle perchance ads yourself in-browser |
-| Direct API access | Respect perchance's terms — no data extraction |
-| Edit mode / utility bar | Not an editor, just a runner |
-| URL bar / free navigation | Each app is locked to its generator's URL |
-
-***
-
-## Customization
-
-### Change accent color per app
-Right-click app card → **✎ Edit App** → choose Accent color.
-
-### Custom User-Agent
-Edit `_setup_profile()` in `app_runner/runner.py` → `setHttpUserAgent(...)`.
-
-### Allow popups (e.g. generators that open sub-windows)
-In `runner.py`, change:
-```python
-s.setAttribute(QWebEngineSettings.JavascriptCanOpenWindows, True)
-```
-
-### Chromium flags
-```bash
-# macOS / Linux
-export QTWEBENGINE_CHROMIUM_FLAGS="--autoplay-policy=no-user-gesture-required"
-python main.py
-
-# Windows (set in System Properties → Environment Variables)
-QTWEBENGINE_CHROMIUM_FLAGS=--autoplay-policy=no-user-gesture-required
-```
-
-***
-
-## Dependencies
-
-```
-PyQt5>=5.15.0
-PyQtWebEngine>=5.15.0
-```
-
-Both are available via pip and work on Windows, macOS, and Linux without
-any additional system dependencies.
-
-```bash
-pip install PyQt5 PyQtWebEngine
-```
-
-On Linux you may also need:
-```bash
-sudo apt install python3-pyqt5.qtwebengine   # Debian/Ubuntu
-# or
-pip install PyQt5 PyQtWebEngine              # via pip (preferred)
-```
+Bundled libraries, models, and content retain their respective licenses. See
+`THIRD_PARTY_NOTICES.md` in the portable distribution.
